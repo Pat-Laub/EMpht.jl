@@ -262,31 +262,4 @@ end
 
 gr()
 
-@time em("cexample1-sample.json")
-#@profile em("cexample1-sample.json")
-
-# em("phases-10",5)
-#
-# @time em("phases-10", 150)
-#
-#
-# @time em("phases-10",1)
-# @time em("phases-50", 1)
-# @time em("phases-75", 1)
-# @time em("phases-75-init", 1)
-# @time em("phases-75-init.out", 10000)
-
-
-## Old code!
-#srand(1)
-#ys = 10 + randn(100)
-#p = 10
-#π_iter = (1:p .== 1)
-#T_iter = [-2 1; 0 -3]
-#T_iter = [-0.994018 0.892225; 0 -0.809259]
-
-#T_iter = diagm(-ones(p)) + diagm(0.5*ones(p-1), 1)
-#t_iter = -T_iter * ones(p)
-
-#sol = solve(prob, BS3(), tstops=ys, adaptive = false) #, BS3() Tsit5()  , saveat=1.0
-#solEval = sol(ys).u
+em("example1-sample.json")
