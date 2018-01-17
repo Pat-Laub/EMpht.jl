@@ -1,0 +1,14 @@
+{
+	"Sample": {
+		"Uncensored": {
+			"Observations": [1]
+		},
+		"RightCensored": {
+			"Cutoffs": [25],
+			"Weights": [2]
+		},
+		"IntervalCensored": {
+			"Intervals": [[10, 12], [15, 18], [2000, 2001]]
+		}
+	}
+}
