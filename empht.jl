@@ -1,81 +1,79 @@
 using JSON
 using OrdinaryDiffEq
-using Plots
-gr()
+using Plots; gr();
+include("phasetype.jl");
 
-struct PhaseType
-    π
-    T
-    t
-end
-
+# Definition of a sample which we fit the phase-type distribution to.
 struct Sample
-    obs
-    obsWeights
-    cens
-    censWeights
-    ints
-    intsWeights
-end
+    obs::Vector{Float64}
+    obsweight::Vector{Float64}
+    cens::Vector{Float64}
+    censweight::Vector{Float64}
+    int::Matrix{Float64}
+    intweight::Vector{Float64}
 
-function ode_observations(_, u, fit, du)
-    p = length(fit.π)
-
-    # da = a' * T (where the first p components of u are 'a')
-    du[1:p] = u[1:p]' * fit.T
-
-    # db = T * b (where the next p components of u are 'b')
-    du[p+1:2p] = fit.T * u[p+1:2p]
-
-    ## dc = T * [c_1 c_2 ... c_p] + t * a
-    du[2p+1:end] = vec(fit.T * reshape(u[2p+1:end], p, p) + fit.t * u[1:p]')
-end
-
-function ode_censored(_, u, fit, du)
-    p = length(fit.π)
-
-    # da = a' * T (where the first p components of u are 'a')
-    du[1:p] = u[1:p]' * fit.T
-
-    # db = T * b (where the next p components of u are 'b')
-    du[p+1:2p] = fit.T * u[p+1:2p]
-
-    ## dc = T * [d_1 d_2 ... d_p] + [a_1*ones(p) a_2*ones(p) ... a_p*ones(p)]
-    du[2p+1:end] = vec(fit.T * reshape(u[2p+1:end], p, p) .+ u[1:p]')
-    println(du[2p+1:end])
-
-    for i = 1:p
-        du[(i+1)*p+1:(i+2)*p] = fit.T*u[(i+1)*p+1:(i+2)*p] + u[i]
+    function Sample(obs::Vector{Float64}, obsweight::Vector{Float64},
+            cens::Vector{Float64}, censweight::Vector{Float64},
+            int::Matrix{Float64}, intweight::Vector{Float64})
+        cond = all(obs .>= 0) && all(obsweight .> 0) && all(cens .>= 0) &&
+                all(censweight .> 0) && all(int .>= 0) && all(intweight .> 0)
+        if ~cond
+            error("Require non-negativity of observations and positivity of weight")
+        end
+        new(obs, obsweight, cens, censweight, int, intweight)
     end
+end
 
-    println(du[2p+1:end])
+function ode_observations!(_, u::AbstractArray{Float64}, fit::PhaseType, du::AbstractArray{Float64})
+    p = fit.p
+    u[1:end] = max.(u, 0)
+
+    # da = a' * T (where the first p components of u are 'a')
+    du[1:p] = transpose(u[1:p]) * fit.T
+
+    # db = T * b (where the next p components of u are 'b')
+    du[p+1:2p] = fit.T * u[p+1:2p]
+
+    # dc = T * [c_1 c_2 ... c_p] + t * a
+    du[2p+1:end] = vec(fit.T * reshape(u[2p+1:end], p, p) + fit.t * transpose(u[1:p]))
+end
+
+function ode_censored!(_, u::AbstractArray{Float64}, fit::PhaseType, du::AbstractArray{Float64})
+    p = fit.p
+    u[1:end] = max.(u, 0)
+
+    # da = a' * T (where the first p components of u are 'a')
+    du[1:p] = transpose(u[1:p]) * fit.T
+
+    # db = T * b (where the next p components of u are 'b')
+    du[p+1:2p] = fit.T * u[p+1:2p]
+
+    # dc = T * [d_1 d_2 ... d_p] + [a_1*ones(p) a_2*ones(p) ... a_p*ones(p)]
+    du[2p+1:end] = vec(fit.T * reshape(u[2p+1:end], p, p) .+ transpose(u[1:p]))
 end
 
 
-function loglikelihood(s, fit)
+function loglikelihoodcensored(s::Sample, fit::PhaseType)
     ll = 0.0
 
-    if length(s.obs) > 0
-        for v = 1:length(s.obs)
-            ll += s.obsWeights[v] * log(fit.π' * expm(fit.T * s.obs[v]) * fit.t)
-        end
+    for k = 1:length(s.obs)
+        ll += s.obsweight[k] * log(pdf(fit, s.obs[k]))
     end
 
-    # THIS SHOULD BE CHECKED! SURELY SOMETHING IS MISSING"
-    if length(s.cens) > 0
-        for v = 1:length(s.obs)
-            ll += s.censWeights[v] * log(fit.π' * expm(fit.T * s.cens[v]) * fit.t)
-        end
+    for k = 1:length(s.cens)
+        ll += s.censweight[k] * log(1 - cdf(fit, s.cens[k]))
     end
 
-    if length(s.ints) > 0
-        error("Haven't implemented interval-censoring yet")
+    for k = 1:size(s.int, 1)
+        cdf_upper = cdf(fit, s.int[k,2])
+        cdf_lower = cdf(fit, s.int[k,1])
+        ll += s.intweight[k] * log(cdf_upper - cdf_lower)
     end
 
-    return ll
+    ll
 end
 
-function parse_settings(settings_filename)
+function parse_settings(settings_filename::String)
     # Check the file exists.
     if ~isfile(settings_filename)
         error("Settings file $settings_filename not found.")
@@ -88,13 +86,7 @@ function parse_settings(settings_filename)
 
     # Read in the properties of this fit (e.g. number of phases, PH structure)
     println("Reading settings from $settings_filename")
-    settings = Dict()
-    open(settings_filename, "r") do f
-        dicttxt = readstring(f)
-        settings = JSON.parse(dicttxt)
-    end
-    # I'd like to use the following, but it doesn't close the file properly.
-    #settings = JSON.parsefile(settings_filename)
+    settings = JSON.parsefile(settings_filename, use_mmap=false)
 
     name = get(settings, "Name", basename(settings_filename)[1:end-5])
     p = get(settings, "NumberPhases", 15)
@@ -112,24 +104,21 @@ function parse_settings(settings_filename)
     # Fill in the default values for the sample.
     s = settings["Sample"]
 
-    obs = haskey(s, "Uncensored") ? s["Uncensored"]["Observations"] : []
-    cens = haskey(s, "RightCensored") ? s["RightCensored"]["Cutoffs"] : []
-    ints = haskey(s, "IntervalCensored") ? s["IntervalCensored"]["Intervals"] : []
+    obs = haskey(s, "Uncensored") ? Vector{Float64}(s["Uncensored"]["Observations"]) : Vector{Float64}()
+    cens = haskey(s, "RightCensored") ? Vector{Float64}(s["RightCensored"]["Cutoffs"]) : Vector{Float64}()
+    int = haskey(s, "IntervalCensored") ? Matrix{Float64}(transpose(hcat(s["IntervalCensored"]["Intervals"]...))) : Matrix{Float64}(0, 0)
 
-    # Parse the list of intervals as a 2d array.
-    ints = hcat(ints...)
+    # Set the weight to 1 if not specified.
+    obsweight = length(obs) > 0 && haskey(s["Uncensored"], "Weights") ? Vector{Float64}(s["Uncensored"]["Weights"]) : ones(length(obs))
+    censweight = length(cens) > 0 && haskey(s["RightCensored"], "Weights") ? Vector{Float64}(s["RightCensored"]["Weights"]) : ones(length(cens))
+    intweight = length(int) > 0 && haskey(s["IntervalCensored"], "Weights") ? Vector{Float64}(s["IntervalCensored"]["Weights"]) : ones(length(int))
 
-    # Set the weights to 1 if not specified.
-    obsWeights = length(obs) > 0 && haskey(s["Uncensored"], "Weights") ? s["Uncensored"]["Weights"] : ones(length(obs))
-    censWeights = length(cens) > 0 && haskey(s["RightCensored"], "Weights") ? s["RightCensored"]["Weights"] : ones(length(cens))
-    intsWeights = length(ints) > 0 && haskey(s["IntervalCensored"], "Weights") ? s["IntervalCensored"]["Weights"] : ones(length(ints))
+    s = Sample(obs, obsweight, cens, censweight, int, intweight)
 
-    s = Sample(obs, obsWeights, cens, censWeights, ints, intsWeights)
-
-    return (name, p, ph_structure, continueFit, num_iter, s)
+    (name, p, ph_structure, continueFit, num_iter, s)
 end
 
-function initial_phasetype(name, p, ph_structure, continueFit, s)
+function initial_phasetype(name::String, p::Int, ph_structure::String, continueFit::Bool, s::Sample)
     # If there is a <Name>_phases.csv then read the data from there.
     phases_filename = string(name, "_fit.csv")
 
@@ -167,10 +156,10 @@ function initial_phasetype(name, p, ph_structure, continueFit, s)
         T -= diagm(T*ones(p) + t)
 
         # Rescale t and T using the same scaling as in the EMPHT.c program.
-        if length(s.obs) > min(length(s.cens), length(s.ints))
+        if length(s.obs) > min(length(s.cens), length(s.int))
             scalefactor = median(s.obs)
-        elseif length(s.ints) > length(s.cens)
-            scalefactor = median(s.ints[2,:])
+        elseif length(s.int) > length(s.cens)
+            scalefactor = median(s.int[2,:])
         else
             scalefactor = median(s.cens)
         end
@@ -179,11 +168,11 @@ function initial_phasetype(name, p, ph_structure, continueFit, s)
         T *= p / scalefactor
     end
 
-    return PhaseType(π, T, t)
+    PhaseType(π, T)
 end
 
-function save_progress(name, p, s, fit, plotDens, plotMax)
-    ll = loglikelihood(s, fit)
+function save_progress(name::String, s::Sample, fit::PhaseType, plotDens::Bool, plotMax::Float64)
+    ll = loglikelihoodcensored(s, fit)
     println("loglikelihood $ll")
 
     open(string(name, "_loglikelihood.csv"), "a") do f
@@ -193,30 +182,39 @@ function save_progress(name, p, s, fit, plotDens, plotMax)
     writedlm(string(name, "_fit.csv"), [fit.π fit.T])
 
     if plotDens
-        d(y) = fit.π' * expm(fit.T * y) * fit.t
         xVals = linspace(0, plotMax, 100)
-        yVals = d.(xVals)
+        yVals = pdf.(fit, xVals)
         fig = plot!(xVals, yVals)
         png(string(name, "_fit"))
-        return fig
+        fig
     end
-
-    #println("Mean of fit is $(-fit.π' * inv(fit.T) * ones(p))")
 end
 
-function conditional_on_obs(s, p, fit, Bs, Zs, Ns)
+function ensure_positive!(u)
+    if ~all(u .>= 0)
+        if all(isapprox.(min.(u, 0), 0, atol=1e-4))
+            #warn("ODE solutions slightly negative")
+            u[1:end] = max.(u, 0)
+        else
+            error("All ODE solutions should be non-negative: got $u")
+        end
+    end
+end
+
+function conditional_on_obs!(s::Sample, fit::PhaseType, Bs::AbstractArray{Float64}, Zs::AbstractArray{Float64}, Ns::AbstractArray{Float64})
     # Setup initial conditions.
+    p = fit.p
     u0 = zeros(p*(p+2)); u0[1:p] = fit.π; u0[p+1:2p] = fit.t
 
     # Run the ODE solver.
-    pf = ParameterizedFunction(ode_observations, fit)
+    pf = ParameterizedFunction(ode_observations!, fit)
     prob = ODEProblem(pf, u0, (0.0, 1.05*maximum(s.obs)))
     sol = solve(prob, BS3()) #BS3() tstops , saveat=s.obs
 
-    for v = 1:length(s.obs)
-
-        weight = s.obsWeights[v]
-        u = sol(s.obs[v])
+    for k = 1:length(s.obs)
+        weight = s.obsweight[k]
+        u = sol(s.obs[k])
+        ensure_positive!(u)
 
         a = u[1:p]; b = u[p+1:2p]
         π_by_b = fit.π .* b; denom = sum(π_by_b)
@@ -237,20 +235,25 @@ function conditional_on_obs(s, p, fit, Bs, Zs, Ns)
     end
 end
 
-function conditional_on_cens(s, p, fit, Bs, Zs, Ns)
+function conditional_on_cens!(s::Sample, fit::PhaseType, Bs::AbstractArray{Float64}, Zs::AbstractArray{Float64}, Ns::AbstractArray{Float64})
     # Setup initial conditions.
+    p = fit.p
     u0 = zeros(p*(p+2)); u0[1:p] = fit.π; u0[p+1:2p] = 1
 
+    # Should tell the ODE solver to evaluate all right and interval censored points.
+    allcens = vcat(s.cens, vec(s.int))
+
     # Run the ODE solver.
-    pf = ParameterizedFunction(ode_censored, fit)
-    prob = ODEProblem(pf, u0, (0.0, 1.1*maximum(s.cens)))
-    sol = solve(prob, BS3(), saveat=s.cens) #tstops # BS3()
+    pf = ParameterizedFunction(ode_censored!, fit)
+    prob = ODEProblem(pf, u0, (0.0, 1.1*maximum(allcens)))
+    sol = solve(prob, BS3(), saveat=allcens) #tstops # BS3()
 
-    for v = 1:length(s.cens)
-        weight = s.censWeights[v]
-        u = sol(s.cens[v])
+    for k = 1:length(s.cens)
+        weight = s.censweight[k]
+        u = sol(s.cens[k])
+        ensure_positive!(u)
 
-        a = u[1:p]; h = u[p+1:2p]
+        h = u[p+1:2p]
         π_by_h = fit.π .* h; denom = sum(π_by_h)
 
         Bs[:] = Bs[:] + weight * π_by_h / denom
@@ -266,23 +269,57 @@ function conditional_on_cens(s, p, fit, Bs, Zs, Ns)
             end
         end
     end
+
+    for k = 1:size(s.int, 1)
+        weight = s.intweight[k]
+        left, right = s.int[k,:]
+
+        u_left = sol(left); u_right = sol(right)
+        ensure_positive!(u_left); ensure_positive!(u_right)
+
+        #h_left = u_left[p+1:2p]; h_right = u_right[p+1:2p]
+        Δh = u_right[p+1:2p] - u_left[p+1:2p]
+        #a_left = u_left[1:p]; a_right = u_right[1:p]
+        #g_left = (a_left - fit.π) * fit.Tinv; g_right = (a_right - fit.π) * fit.Tinv
+        Δg = transpose(u_right[1:p] - u_left[1:p]) * fit.Tinv
+        π_by_minusΔh = -fit.π .* Δh; denom = sum(π_by_minusΔh)
+        Bs[:] = Bs[:] + weight * π_by_minusΔh / denom
+
+        for i = 1:p
+            Δd_i = u_right[(i+1)*p+1:(i+2)*p] - u_left[(i+1)*p+1:(i+2)*p]
+            Zs[i] = Zs[i] + weight * (Δg[i] - Δd_i[i]) / denom ####### TO fix, goes negative
+            Ns[i,end] = Ns[i,end] + weight * fit.t[i] * Δg[i] / denom
+
+            for j = 1:p
+                if i==j
+                    continue
+                end
+                Ns[i,j] = Ns[i,j] + weight * fit.T[i,j] * (Δg[i] - Δd_i[j]) / denom
+            end
+        end
+    end
 end
 
-function em(settings_filename)
+function em(settings_filename::String)
     # Read in details for the fit from the settings file.
     name, p, ph_structure, continueFit, num_iter, s = parse_settings(settings_filename)
     println("name, p, ph_structure, continueFit, num_iter = $((name, p, ph_structure, continueFit, num_iter))")
 
-    # Count the total of all weights.
-    sumOfWeights = sum(s.obsWeights) + sum(s.censWeights) + sum(s.intsWeights)
+    # Check we don't just have right-censored obs, since this blows things up.
+    if length(s.obs) == 0 && length(s.cens) > 0 && length(s.int) == 0
+        error("Can't just have right-censored observations!")
+    end
+
+    # Count the total of all weight.
+    sumOfWeights = sum(s.obsweight) + sum(s.censweight) + sum(s.intweight)
 
     # Find the largest of the different samples to set appropriate plot size.
-    plotMax = 1.1 * mapreduce(l -> length(l) > 0 ? maximum(l) : 0, max, (s.obs, s.cens, s.ints))
+    plotMax = 1.1 * mapreduce(l -> length(l) > 0 ? maximum(l) : 0, max, (s.obs, s.cens, s.int))
 
     # Construct the initial phase-type fit for the EM algorithm.
     fit = initial_phasetype(name, p, ph_structure, continueFit, s)
 
-    println("Initial loglikelihood = $(loglikelihood(s, fit))")
+    println("Initial loglikelihood = $(loglikelihoodcensored(s, fit))")
 
     fig = plot()
     for iter = 1:num_iter
@@ -294,20 +331,19 @@ function em(settings_filename)
         Bs = zeros(p); Zs = zeros(p); Ns = zeros(p, p+1)
 
         if length(s.obs) > 0
-            conditional_on_obs(s, p, fit, Bs, Zs, Ns)
+            conditional_on_obs!(s, fit, Bs, Zs, Ns)
         end
 
-        if length(s.cens) > 0
-            conditional_on_cens(s, p, fit, Bs, Zs, Ns)
-        end
-
-        if length(s.ints) > 0
-            error("Haven't implemented interval-censoring yet")
+        if length(s.cens) > 0 || length(s.int) > 0
+            conditional_on_cens!(s, fit, Bs, Zs, Ns)
         end
 
         ## The maximisation step!
         π_next = Bs ./ sumOfWeights
         t_next = Ns[:,end] ./ Zs
+        println("Ns[:,end] = $(Ns[:,end])")
+        println("Zs = $Zs")
+        println("t_next = $t_next")
 
         T_next = zeros(p,p)
         for i=1:p
@@ -318,15 +354,14 @@ function em(settings_filename)
         # Remove any numerical instabilities.
         π_next = max.(π_next, 0)
         π_next /= sum(π_next)
-        t_next = -T_next * ones(p)
 
-        fit = PhaseType(π_next, T_next, t_next)
+        fit = PhaseType(π_next, T_next)
 
         # Plot each iteration at the beginning
         if iter == num_iter
-            fig = save_progress(name, p, s, fit, true, plotMax)
+            fig = save_progress(name, s, fit, true, plotMax)
         elseif true || iter % 25 == 0 # iter %  ceil(num_iter / 10) == 0
-            save_progress(name, p, s, fit, true, plotMax)
+            save_progress(name, s, fit, false, plotMax)
         end
     end
 
@@ -335,3 +370,5 @@ end
 
 
 @time em("example1-sample.json")
+@time em("cexample1-sample.json")
+@time em("example2-sample.json")
