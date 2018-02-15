@@ -1,3 +1,4 @@
+using Cubature
 using JSON
 using OrdinaryDiffEq
 using Plots; gr();
@@ -24,34 +25,17 @@ struct Sample
     end
 end
 
-function ode_observations!(_, u::AbstractArray{Float64}, fit::PhaseType, du::AbstractArray{Float64})
-    p = fit.p
-    u[1:end] = max.(u, 0)
-
-    # da = a' * T (where the first p components of u are 'a')
-    du[1:p] = transpose(u[1:p]) * fit.T
-
-    # db = T * b (where the next p components of u are 'b')
-    du[p+1:2p] = fit.T * u[p+1:2p]
-
-    # dc = T * [c_1 c_2 ... c_p] + t * a
-    du[2p+1:end] = vec(fit.T * reshape(u[2p+1:end], p, p) + fit.t * transpose(u[1:p]))
+function ode_observations!(t::Float64, u::AbstractArray{Float64}, fit::PhaseType, du::AbstractArray{Float64})
+    # dc = T * C + t * a
+    a = fit.π' * expm(fit.T * t)
+    du[:] = vec(fit.T * reshape(u, fit.p, fit.p) + fit.t * a)
 end
 
-function ode_censored!(_, u::AbstractArray{Float64}, fit::PhaseType, du::AbstractArray{Float64})
-    p = fit.p
-    u[1:end] = max.(u, 0)
-
-    # da = a' * T (where the first p components of u are 'a')
-    du[1:p] = transpose(u[1:p]) * fit.T
-
-    # db = T * b (where the next p components of u are 'b')
-    du[p+1:2p] = fit.T * u[p+1:2p]
-
-    # dc = T * [d_1 d_2 ... d_p] + [a_1*ones(p) a_2*ones(p) ... a_p*ones(p)]
-    du[2p+1:end] = vec(fit.T * reshape(u[2p+1:end], p, p) .+ transpose(u[1:p]))
+function ode_censored!(t::Float64, u::AbstractArray{Float64}, fit::PhaseType, du::AbstractArray{Float64})
+    # dc = T * C + 1 * a
+    a = fit.π' * expm(fit.T * t)
+    du[:] = vec(fit.T * reshape(u, fit.p, fit.p) + ones(fit.p) * a)
 end
-
 
 function loglikelihoodcensored(s::Sample, fit::PhaseType)
     ll = 0.0
@@ -65,9 +49,8 @@ function loglikelihoodcensored(s::Sample, fit::PhaseType)
     end
 
     for k = 1:size(s.int, 1)
-        cdf_upper = cdf(fit, s.int[k,2])
-        cdf_lower = cdf(fit, s.int[k,1])
-        ll += s.intweight[k] * log(cdf_upper - cdf_lower)
+        ll_k = log( fit.π' * (expm(fit.T * s.int[k,1]) - expm(fit.T * s.int[k,2]) ) * ones(fit.p) )
+        ll += s.intweight[k] * ll_k
     end
 
     ll
@@ -93,12 +76,13 @@ function parse_settings(settings_filename::String)
     ph_structure = get(settings, "Structure", p < 20 ? "General" : "Coxian")
     continueFit = get(settings, "ContinuePreviousFit", true)
     num_iter = get(settings, "NumberIterations", 1_000)
+    timeout = get(settings, "TimeOut", 30)
 
     # Set the seed for the random number generation if requested.
     if haskey(settings, "RandomSeed")
         srand(settings["RandomSeed"])
     else
-        srand(1337)
+        srand(1)
     end
 
     # Fill in the default values for the sample.
@@ -115,7 +99,7 @@ function parse_settings(settings_filename::String)
 
     s = Sample(obs, obsweight, cens, censweight, int, intweight)
 
-    (name, p, ph_structure, continueFit, num_iter, s)
+    (name, p, ph_structure, continueFit, num_iter, timeout, s)
 end
 
 function initial_phasetype(name::String, p::Int, ph_structure::String, continueFit::Bool, s::Sample)
@@ -139,27 +123,30 @@ function initial_phasetype(name::String, p::Int, ph_structure::String, continueF
             T_legal = trues(p, p)
         elseif ph_structure == "Coxian"
             π_legal = 1:p .== 1
-            T_legal = Tridiagonal(zeros(p-1), ones(p), ones(p-1)) .> 0
+            T_legal = diagm(ones(p-1), 1) .> 0
+        elseif ph_structure == "GeneralisedCoxian"
+            π_legal = trues(p)
+            T_legal = diagm(ones(p-1), 1) .> 0
         else
             error("Nothing implemented for phase-type structure $ph_structure")
         end
 
-        # Create a structure using standard uniforms.
-        t = rand(p)
+        # Create a structure using [0.1, 1] uniforms.
+        t = (0.9 * rand(p) + 0.1)
 
-        π = rand(p)
+        π = (0.9 * rand(p) + 0.1)
         π[.~π_legal] = 0
         π /= sum(π)
 
-        T = rand(p, p)
+        T = (0.9 * rand(p, p) + 0.1)
         T[.~T_legal] = 0
         T -= diagm(T*ones(p) + t)
 
         # Rescale t and T using the same scaling as in the EMPHT.c program.
-        if length(s.obs) > min(length(s.cens), length(s.int))
+        if length(s.obs) > min(length(s.cens), size(s.int, 1))
             scalefactor = median(s.obs)
-        elseif length(s.int) > length(s.cens)
-            scalefactor = median(s.int[2,:])
+        elseif size(s.int, 1) > length(s.cens)
+            scalefactor = median(s.int[:,2])
         else
             scalefactor = median(s.cens)
         end
@@ -171,12 +158,13 @@ function initial_phasetype(name::String, p::Int, ph_structure::String, continueF
     PhaseType(π, T)
 end
 
-function save_progress(name::String, s::Sample, fit::PhaseType, plotDens::Bool, plotMax::Float64)
+function save_progress(name::String, s::Sample, fit::PhaseType, plotDens::Bool, plotMax::Float64, start::DateTime)
     ll = loglikelihoodcensored(s, fit)
     println("loglikelihood $ll")
 
     open(string(name, "_loglikelihood.csv"), "a") do f
-        write(f, "$ll\n")
+        mins = (now() - start).value / 1000 / 60
+        write(f, "$ll $(round(mins, 4))\n")
     end
 
     writedlm(string(name, "_fit.csv"), [fit.π fit.T])
@@ -186,129 +174,153 @@ function save_progress(name::String, s::Sample, fit::PhaseType, plotDens::Bool, 
         yVals = pdf.(fit, xVals)
         fig = plot!(xVals, yVals)
         png(string(name, "_fit"))
-        fig
     end
+
+    ll
 end
 
-function ensure_positive!(u)
-    if ~all(u .>= 0)
-        if all(isapprox.(min.(u, 0), 0, atol=1e-4))
-            #warn("ODE solutions slightly negative")
-            u[1:end] = max.(u, 0)
-        else
-            error("All ODE solutions should be non-negative: got $u")
-        end
-    end
+function c_integrand(u, v, fit, y)
+    # Compute the two vector terms in the integrand
+    first = fit.π' * expm(fit.T * u)
+    second = expm(fit.T * (y-u)) * fit.t
+
+    # Construct the matrix of integrands using outer product
+    # then reshape it to a vector.
+    C = second * first
+    v[:] = vec(C)
 end
+
+function d_integrand(u, v, fit, y)
+    # Compute the two vector terms in the integrand
+    first = fit.π' * expm(fit.T * u)
+    second = expm(fit.T * (y-u)) * ones(fit.p)
+
+    # Construct the matrix of integrands using outer product
+    # then reshape it to a vector.
+    D = second * first
+    v[:] = vec(D)
+end
+
 
 function conditional_on_obs!(s::Sample, fit::PhaseType, Bs::AbstractArray{Float64}, Zs::AbstractArray{Float64}, Ns::AbstractArray{Float64})
     # Setup initial conditions.
     p = fit.p
-    u0 = zeros(p*(p+2)); u0[1:p] = fit.π; u0[p+1:2p] = fit.t
+    u0 = zeros(p*p)
 
     # Run the ODE solver.
     pf = ParameterizedFunction(ode_observations!, fit)
-    prob = ODEProblem(pf, u0, (0.0, 1.05*maximum(s.obs)))
-    sol = solve(prob, BS3()) #BS3() tstops , saveat=s.obs
+    prob = ODEProblem(pf, u0, (0.0, maximum(s.obs)))
+    sol = solve(prob, OwrenZen5())
 
     for k = 1:length(s.obs)
         weight = s.obsweight[k]
+
+        expTy = expm(fit.T * s.obs[k])
+        a = transpose(fit.π' * expTy)
+        b = expTy * fit.t
+
         u = sol(s.obs[k])
-        ensure_positive!(u)
-
-        a = u[1:p]; b = u[p+1:2p]
-        π_by_b = fit.π .* b; denom = sum(π_by_b)
-
-        Bs[:] = Bs[:] + weight * π_by_b / denom
-        for i = 1:p
-            c_i = u[(i+1)*p+1:(i+2)*p]
-            Zs[i] = Zs[i] + weight * c_i[i] ./ denom
-            Ns[i,end] = Ns[i,end] + weight * fit.t[i] * a[i] / denom
-
-            for j = 1:p
-                if i==j
-                    continue
-                end
-                Ns[i,j] = Ns[i,j] + weight * fit.T[i,j] * c_i[j] / denom
-            end
+        C = reshape(u, p, p)
+        if minimum(C) < 0
+            (C,err) = hquadrature(p*p, (x,v) -> c_integrand(x, v, fit, s.obs[k]), 0, s.obs[k], reltol=1e-1, maxevals=500)
+            C = reshape(C, p, p)
         end
+
+        denom = fit.π' * b
+        Bs[:] = Bs[:] + weight * (fit.π .* b) / denom
+        Zs[:] = Zs[:] + weight * diag(C) / denom
+        Ns[:,1:p] = Ns[:,1:p] + weight * (fit.T .* transpose(C) .* (1-eye(p))) / denom
+        Ns[:,p+1] = Ns[:,end] + weight * (fit.t .* a) / denom
     end
 end
 
 function conditional_on_cens!(s::Sample, fit::PhaseType, Bs::AbstractArray{Float64}, Zs::AbstractArray{Float64}, Ns::AbstractArray{Float64})
     # Setup initial conditions.
     p = fit.p
-    u0 = zeros(p*(p+2)); u0[1:p] = fit.π; u0[p+1:2p] = 1
+    u0 = zeros(p*p)
 
     # Should tell the ODE solver to evaluate all right and interval censored points.
     allcens = vcat(s.cens, vec(s.int))
 
     # Run the ODE solver.
     pf = ParameterizedFunction(ode_censored!, fit)
-    prob = ODEProblem(pf, u0, (0.0, 1.1*maximum(allcens)))
-    sol = solve(prob, BS3(), saveat=allcens) #tstops # BS3()
+    prob = ODEProblem(pf, u0, (0.0, maximum(allcens)))
+    sol = solve(prob, OwrenZen5())
 
     for k = 1:length(s.cens)
         weight = s.censweight[k]
+
+        h = expm(fit.T * s.cens[k]) * ones(p)
+
         u = sol(s.cens[k])
-        ensure_positive!(u)
-
-        h = u[p+1:2p]
-        π_by_h = fit.π .* h; denom = sum(π_by_h)
-
-        Bs[:] = Bs[:] + weight * π_by_h / denom
-        for i = 1:p
-            d_i = u[(i+1)*p+1:(i+2)*p]
-            Zs[i] = Zs[i] + weight * d_i[i] ./ denom
-
-            for j = 1:p
-                if i==j
-                    continue
-                end
-                Ns[i,j] = Ns[i,j] + weight * fit.T[i,j] * d_i[j] / denom
-            end
+        D = reshape(u, p, p)
+        if minimum(D) < 0
+            (D, err) = hquadrature(p*p, (x,v) -> d_integrand(x, v, fit, s.cens[k]), 0, s.cens[k], reltol=1e-1, maxevals=500)
+            D = reshape(D, p, p)
         end
+
+        denom = fit.π' * h
+        Bs[:] = Bs[:] + weight * (fit.π .* h) / denom
+        Zs[:] = Zs[:] + weight * diag(D) / denom
+        Ns[:,1:p] = Ns[:,1:p] + weight * (fit.T .* transpose(D) .* (1-eye(p))) / denom
     end
+
+    a = 0; h = 0; g = 0; D = 0; expTRight = 0
 
     for k = 1:size(s.int, 1)
         weight = s.intweight[k]
         left, right = s.int[k,:]
 
-        u_left = sol(left); u_right = sol(right)
-        ensure_positive!(u_left); ensure_positive!(u_right)
+        if k > 1 && left == s.int[k-1,2]
+            a_left = a
+            h_left = h
+            g_left = g
+            D_left = D
+            expTLeft = expTRight
+        else
+            expTLeft = expm(fit.T * left)
+            a_left = transpose(fit.π' * expTLeft)
+            h_left = expTLeft * ones(p)
+            g_left = transpose(fit.T) \ (a_left - fit.π)
 
-        #h_left = u_left[p+1:2p]; h_right = u_right[p+1:2p]
-        Δh = u_right[p+1:2p] - u_left[p+1:2p]
-        #a_left = u_left[1:p]; a_right = u_right[1:p]
-        #g_left = (a_left - fit.π) * fit.Tinv; g_right = (a_right - fit.π) * fit.Tinv
-        Δg = transpose(u_right[1:p] - u_left[1:p]) * fit.Tinv
-        π_by_minusΔh = -fit.π .* Δh; denom = sum(π_by_minusΔh)
-        Bs[:] = Bs[:] + weight * π_by_minusΔh / denom
-
-        for i = 1:p
-            Δd_i = u_right[(i+1)*p+1:(i+2)*p] - u_left[(i+1)*p+1:(i+2)*p]
-            Zs[i] = Zs[i] + weight * (Δg[i] - Δd_i[i]) / denom ####### TO fix, goes negative
-            Ns[i,end] = Ns[i,end] + weight * fit.t[i] * Δg[i] / denom
-
-            for j = 1:p
-                if i==j
-                    continue
-                end
-                Ns[i,j] = Ns[i,j] + weight * fit.T[i,j] * (Δg[i] - Δd_i[j]) / denom
+            u_left = sol(left)
+            D_left = reshape(u_left, p, p)
+            if minimum(D_left) < 0
+                (D_left, err) = hquadrature(p*p, (x,v) -> d_integrand(x, v, fit, left), 0, left, reltol=1e-1, maxevals=500)
+                D_left = reshape(D_left, p, p)
             end
         end
+
+        expTRight = expm(fit.T * right)
+        a = transpose(fit.π' * expTRight)
+        h = expTRight * ones(p)
+        g = transpose(fit.T) \ (a - fit.π)
+
+        u_right = sol(right)
+        D = reshape(u_right, p, p)
+        if minimum(D) < 0
+            (D, err) = hquadrature(p*p, (x,v) -> d_integrand(x, v, fit, right), 0, right, reltol=1e-1, maxevals=500)
+            D = reshape(D, p, p)
+        end
+
+        T_legal = fit.T .> 0
+
+        denom = fit.π' * (expTLeft - expTRight) * ones(fit.p)
+
+        if any( weight * (fit.π .* (h_left - h)) / denom .< 0 )
+            println("pi = $(fit.π)")
+            println("bdiff = $(h_left - h)")
+            println("denom = $denom")
+        end
+        Bs[:] = Bs[:] + weight * (fit.π .* (h_left - h)) / denom
+        Zs[:] = Zs[:] + weight * (g - g_left + diag(D_left) - diag(D)) / denom
+        Ns[:,1:p] = Ns[:,1:p] + weight * T_legal .* (fit.T .* ((g - g_left) .+ transpose(D_left - D))) / denom
+        Ns[:,p+1] = Ns[:,p+1] + weight * (fit.t .* (g - g_left)) / denom
     end
 end
 
-function em(settings_filename::String)
-    # Read in details for the fit from the settings file.
-    name, p, ph_structure, continueFit, num_iter, s = parse_settings(settings_filename)
-    println("name, p, ph_structure, continueFit, num_iter = $((name, p, ph_structure, continueFit, num_iter))")
-
-    # Check we don't just have right-censored obs, since this blows things up.
-    if length(s.obs) == 0 && length(s.cens) > 0 && length(s.int) == 0
-        error("Can't just have right-censored observations!")
-    end
+function em_iterate(name, s, fit, num_iter, timeout, test_run)
+    p = fit.p
 
     # Count the total of all weight.
     sumOfWeights = sum(s.obsweight) + sum(s.censweight) + sum(s.intweight)
@@ -316,15 +328,17 @@ function em(settings_filename::String)
     # Find the largest of the different samples to set appropriate plot size.
     plotMax = 1.1 * mapreduce(l -> length(l) > 0 ? maximum(l) : 0, max, (s.obs, s.cens, s.int))
 
-    # Construct the initial phase-type fit for the EM algorithm.
-    fit = initial_phasetype(name, p, ph_structure, continueFit, s)
+    start = now()
 
-    println("Initial loglikelihood = $(loglikelihoodcensored(s, fit))")
+    save_progress(name, s, fit, true, plotMax, start)
 
+    ll = 0
     fig = plot()
+    numPlots = 0
     for iter = 1:num_iter
-        if iter == 1 || iter % 25 == 0 # iter % ceil(num_iter / 10) == 0
-            println("Starting iteration $iter")
+        if iter == 1 || iter % 5 == 0
+            mins = (now() - start).value / 1000 / 60
+            println("Starting iteration $iter ($(round(mins, 2)) mins)")
         end
 
         ##  The expectation step!
@@ -338,12 +352,21 @@ function em(settings_filename::String)
             conditional_on_cens!(s, fit, Bs, Zs, Ns)
         end
 
+        if minimum(Bs) < 0
+            println("Bs = $Bs")
+            error("Bs shouldn't go negative")
+        end
+        if minimum(Zs) < 0
+            error("Zs shouldn't go negative")
+        end
+        if minimum(Ns) < 0
+            println("Ns = $Ns")
+            error("Ns shouldn't go negative $(minimum(Ns))")
+        end
+
         ## The maximisation step!
         π_next = Bs ./ sumOfWeights
         t_next = Ns[:,end] ./ Zs
-        println("Ns[:,end] = $(Ns[:,end])")
-        println("Zs = $Zs")
-        println("t_next = $t_next")
 
         T_next = zeros(p,p)
         for i=1:p
@@ -357,18 +380,67 @@ function em(settings_filename::String)
 
         fit = PhaseType(π_next, T_next)
 
-        # Plot each iteration at the beginning
-        if iter == num_iter
-            fig = save_progress(name, s, fit, true, plotMax)
-        elseif true || iter % 25 == 0 # iter %  ceil(num_iter / 10) == 0
-            save_progress(name, s, fit, false, plotMax)
+        if (now() - start) > Dates.Minute(round(timeout))
+            ll = save_progress(name, s, fit, ~test_run, plotMax, start)
+            println("Quitting due to going overtime after $iter iterations.")
+            break
         end
+
+        # Plot each iteration at the beginning
+        saveplot = ~test_run && (iter % 10 == 0) && numPlots < 20
+        numPlots += saveplot
+        ll = save_progress(name, s, fit, saveplot, plotMax, start)
     end
 
-    fig
+    ll
 end
 
+function em(settings_filename::String)
+    # Read in details for the fit from the settings file.
+    name, p, ph_structure, continueFit, num_iter, timeout, s = parse_settings(settings_filename)
+    println("name, p, ph_structure, continueFit, num_iter, timeout = $((name, p, ph_structure, continueFit, num_iter, timeout))")
+    println("Starting with ODE solver, but switching to quadrature on failure")
 
-@time em("example1-sample.json")
-@time em("cexample1-sample.json")
-@time em("example2-sample.json")
+    # Check we don't just have right-censored obs, since this blows things up.
+    if length(s.obs) == 0 && length(s.cens) > 0 && length(s.int) == 0
+        error("Can't just have right-censored observations!")
+    end
+
+    # If not continuing previous fit, remove any left-over output files.
+    if ~continueFit
+        rm(string(name, "_loglikelihood.csv"), force=true)
+        rm(string(name, "_fit.csv"), force=true)
+    end
+
+    # If we start randomly, give it a go from 3 locations before fully running.
+    if ~continueFit
+        fit1 = initial_phasetype(name, p, ph_structure, continueFit, s)
+        fit2 = initial_phasetype(name, p, ph_structure, continueFit, s)
+        fit3 = initial_phasetype(name, p, ph_structure, continueFit, s)
+
+        ll1 = em_iterate(name, s, fit1, 30, timeout/4, true)
+        ll2 = em_iterate(name, s, fit2, 30, timeout/4, true)
+        ll3 = em_iterate(name, s, fit3, 30, timeout/4, true)
+
+        maxll = maximum([ll1, ll2, ll3])
+        println("Best ll was $maxll out of $([ll1, ll2, ll3])")
+        if ll1 == maxll
+            println("Using first guess")
+            fit = fit1
+        elseif ll2 == maxll
+            println("Using second guess")
+            fit = fit2
+        else
+            println("Using third guess")
+            fit = fit3
+        end
+    else
+        fit = initial_phasetype(name, p, ph_structure, continueFit, s)
+    end
+
+    if p <= 10
+        println("first pi is $(fit.π), first T is $(fit.T)\n")
+    end
+
+    em_iterate(name, s, fit, num_iter, timeout, false)
+end
