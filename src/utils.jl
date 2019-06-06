@@ -23,12 +23,14 @@ function loglikelihoodcensored(s::Sample, fit::PhaseType)
 end
 
 function initial_phasetype(name::String, p::Int, ph_structure::String,
-        continueFit::Bool, s::Sample)
+        continueFit::Bool, s::Sample, verbose::Bool)
     # If there is a <Name>_phases.csv then read the data from there.
     phases_filename = string(name, "_fit.csv")
 
     if continueFit && isfile(phases_filename)
-        println("Continuing fit in $phases_filename")
+        if verbose
+            println("Continuing fit in $phases_filename")
+        end
         phases = readdlm(phases_filename)
         π = phases[1:end, 1]
         T = phases[1:end, 2:end]
@@ -38,7 +40,9 @@ function initial_phasetype(name::String, p::Int, ph_structure::String,
         t = -T * ones(p)
 
     else # Otherwise, make a random start for the matrix.
-        println("Using a random starting value")
+        if verbose
+            println("Using a random starting value")
+        end
         if ph_structure == "General"
             π_legal = trues(p)
             T_legal = trues(p, p)

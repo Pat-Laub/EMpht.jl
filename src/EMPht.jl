@@ -1,7 +1,13 @@
+module EMPht
+
 using Dates
 using LinearAlgebra
 using Random
 using Statistics
+
+export empht
+# export loglikelihoodcensored
+# export parse_settings
 
 include("sample.jl")
 include("phasetype.jl")
@@ -103,8 +109,8 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbo
     fit
 end
 
-function em(s; p=1, ph_structure="Coxian", name="", continueFit=false,
-        method=:unif, max_iter=1_000, timeout=30, verbose=false)
+function empht(s; p=1, ph_structure="Coxian", name="", continueFit=false,
+        method=:unif, max_iter=100, timeout=1, verbose=false)
 
     if verbose
         println("(p,ph_structure,name,method,continueFit,max_iter,timeout) = ",
@@ -122,7 +128,7 @@ function em(s; p=1, ph_structure="Coxian", name="", continueFit=false,
         rm(string(name, "_fit.csv"), force=true)
     end
 
-    fit = initial_phasetype(name, p, ph_structure, continueFit, s)
+    fit = initial_phasetype(name, p, ph_structure, continueFit, s, verbose)
 
     if verbose && p <= 10
         println("first pi is $(fit.π), first T is $(fit.T)\n")
@@ -131,7 +137,9 @@ function em(s; p=1, ph_structure="Coxian", name="", continueFit=false,
     em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbose)
 end
 
-function em(settings_filename::String)
+function empht(settings_filename::String)
     # Read in details for the fit from the settings file.
     em(parse_settings(settings_filename) ...)
 end
+
+end # module
