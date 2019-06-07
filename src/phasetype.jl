@@ -10,7 +10,8 @@ macro check_args(D, cond)
     quote
         if !($(esc(cond)))
             throw(ArgumentError(string(
-                $(string(D)), ": the condition ", $(string(cond)), " is not satisfied.")))
+                $(string(D)), ": the condition ", $(string(cond)),
+                " is not satisfied.")))
         end
     end
 end
@@ -27,7 +28,8 @@ struct PhaseType <: ContinuousUnivariateDistribution
     function PhaseType(π, T, t, p)
         @check_args(PhaseType, all(π .>= zero(π[1])))
         @check_args(PhaseType, isapprox(sum(π), 1.0, atol=1e-4))
-        @check_args(PhaseType, p == length(π) && p == length(t) && all(p .== size(T)))
+        @check_args(PhaseType, p == length(π) && p == length(t) &&
+            all(p .== size(T)))
         @check_args(PhaseType, all(t .>= zero(t[1])))
         @check_args(PhaseType, all(isapprox(t, -T*ones(p))))
         new(π, T, t, p)
@@ -47,7 +49,8 @@ cdf(d::PhaseType, x::Real) = 1 - transpose(d.π) * exp(d.T * x) * ones(d.p)
 
 mean(d::PhaseType) = -transpose(d.π) * inv(d.T) * ones(d.p)
 
-iscoxian(d::PhaseType) = all(isapprox.(d.T[diagm(0 => ones(d.p), 1 => ones(d.p-1)) .< 1], 0))
+iscoxian(d::PhaseType) = all(isapprox.(d.T[diagm(0 => ones(d.p),
+    1 => ones(d.p-1)) .< 1], 0))
 
 function reverse_coxian(π::AbstractArray{Float64}, T::AbstractArray{Float64},
         t::AbstractArray{Float64})

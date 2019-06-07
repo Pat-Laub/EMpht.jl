@@ -36,8 +36,10 @@ fitPDFs = pdf.(phCF1, xGrid)
 
 @test norm(truePDFs .- fitPDFs, Inf) <= 1e-1
 
+# Test that reading settings from a file works.
+ph100 = empht("Coxian100.json")
 
-# ## Test that some of the internal functions work as expected.
+# Test that some of the internal functions work as expected.
 π=[0.005632862236468221, 0.00898302181442919, 0.007418596691981033,
         0.020026201266915976, 0.04062880012941406, 0.05812175206666447,
         0.04260242040415281, 0.1654039105298598, 0.3888838419368729,

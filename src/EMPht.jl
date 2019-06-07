@@ -15,7 +15,8 @@ include("utils.jl")
 include("ode.jl")
 include("uniformization.jl")
 
-function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbose)
+function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
+        verbose)
     p = fit.p
 
     # Count the total of all weight.
@@ -137,9 +138,12 @@ function empht(s; p=1, ph_structure="Coxian", name="", continueFit=false,
     em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbose)
 end
 
-function empht(settings_filename::String)
+function empht(settings_filename::String; method=:unif, verbose=false)
     # Read in details for the fit from the settings file.
-    em(parse_settings(settings_filename) ...)
+    s, p, ph_structure, name, continueFit, max_iter, timeout =
+        parse_settings(settings_filename)
+    empht(s, p=p, ph_structure=ph_structure, name=name, continueFit=continueFit,
+            method=method, max_iter=max_iter, timeout=timeout, verbose=verbose)
 end
 
 end # module
