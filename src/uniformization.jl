@@ -1,3 +1,5 @@
+using StaticArrays
+
 # Calculate the integral of s=0 to t of exp(T(t-s)) beta alpha exp(T s) ds
 # using the uniformized version of T (specified by P and r). See equation (44)
 # of Okamura et al (2012), Improvement of expectation-maximization algorithm
@@ -17,10 +19,10 @@ function conv_int_unif(r, P, t, beta, alpha)
     poissPDFs = pdf.(Poisson(r*t), 1:R+1)
 
     alphas = Array{Float64}(undef, p, R+1)
-    alphas[:, R+1] = poissPDFs[R+1] .* alpha'
+    alphas[:, R+1] = poissPDFs[R+1] * alpha'
 
     for u = (R-1):-1:0
-        alphas[:, u+1] = alphas[:, u+2]' * P + poissPDFs[u+1] .* alpha'
+        alphas[:, u+1] = alphas[:, u+2]' * P + poissPDFs[u+1] * alpha'
     end
 
     Υ = zeros(p, p)
@@ -92,11 +94,11 @@ function e_step_censored_uniform!(s::Sample, fit::PhaseType,
     K = size(int, 1)
     deltaTs = int[:,2] - int[:,1]
 
-    barfs = zeros(p, K+1)
-    tildefs = zeros(p, K)
-    barbs = zeros(p, K+1)
-    tildebs = zeros(p, K)
-    ws = zeros(K+1)
+    barfs = @MMatrix zeros(p, K+1)
+    tildefs = @MMatrix zeros(p, K)
+    barbs = @MMatrix zeros(p, K+1)
+    tildebs = @MMatrix zeros(p, K)
+    ws = @MVector zeros(K+1)
     N = sum(intweight)
     U = 0
 
@@ -118,14 +120,14 @@ function e_step_censored_uniform!(s::Sample, fit::PhaseType,
     U += fit.π' * barbs[:,K+1]
     ws[K+1] = 0
 
-    cs = zeros(p, K)
-    cs[:,K] = (ws[K+1] - ws[K]) .* fit.π'
+    cs = @MMatrix zeros(p, K)
+    cs[:,K] = (ws[K+1] - ws[K]) * fit.π'
     for k = (K-1):-1:1
         cs[:,k] = cs[:,k+1]' * exp(fit.T * deltaTs[k+1]) +
-            (ws[k+1] - ws[k]) .* fit.π'
+            (ws[k+1] - ws[k]) * fit.π'
     end
 
-    H = zeros(p, p)
+    H = @MMatrix zeros(p, p)
     r = 1.01 * maximum(abs.(diag(fit.T)))
     P = I + (fit.T ./ r)
 

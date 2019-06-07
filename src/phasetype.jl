@@ -1,6 +1,7 @@
 ## Definition of a phase-type distribution, and related functions.
 using Distributions
 using Statistics: cor, cov, median, std, quantile
+using StaticArrays
 
 import Base: minimum, maximum
 import Distributions: cdf, insupport, logpdf, pdf
@@ -17,20 +18,21 @@ end
 
 struct PhaseType <: ContinuousUnivariateDistribution
     # Defining properties
-    π # entry probabilities
-    T # transition probabilities
+    π::StaticArray # entry probabilities
+    T::StaticArray # transition probabilities
 
     # Derived properties
-    t # exit probabilities
-    p # number of phases
+    t::StaticArray # exit probabilities
+    p::Int64 # number of phases
 
-    function PhaseType(π, T, t, p)
+    function PhaseType(π::AbstractArray{Float64,1}, T::AbstractArray{Float64,2},
+            t::AbstractArray{Float64,1}, p::Int64)
         @check_args(PhaseType, all(π .>= zero(π[1])))
         @check_args(PhaseType, isapprox(sum(π), 1.0, atol=1e-4))
         @check_args(PhaseType, p == length(π) && p == length(t) && all(p .== size(T)))
         @check_args(PhaseType, all(t .>= zero(t[1])))
         @check_args(PhaseType, all(isapprox(t, -T*ones(p))))
-        new(π, T, t, p)
+        new(SVector{p}(π), SMatrix{p,p}(T), SVector{p}(t), p)
     end
 end
 
@@ -70,8 +72,8 @@ end
 function sort_into_canonical_form(π::AbstractArray{Float64},
         T::AbstractArray{Float64}, t::AbstractArray{Float64})
     p = length(π)
-    λ = -diag(T)
-    π = π[:]
+    λ = MVector{p}(-diag(T))
+    π = MVector{p}(π)
 
     while true
         swapped = false

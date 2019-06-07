@@ -37,7 +37,9 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbo
     numPlots = 0
     for iter = 1:max_iter
         ##  The expectation step!
-        Bs = zeros(p); Zs = zeros(p); Ns = zeros(p, p+1)
+        Bs = @MVector zeros(p)
+        Zs = @MVector zeros(p)
+        Ns = @MMatrix zeros(p, p+1)
 
         if length(s.obs) > 0
             if method == :unif
@@ -60,7 +62,7 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbo
         end
 
         ## The maximisation step!
-        π_next = max.(Bs ./ sumOfWeights, 0)
+        π_next = max.(Bs / sumOfWeights, 0)
         t_next = max.(Ns[:,end] ./ Zs, 0)
         t_next[isnan.(t_next)] .= 0
 
