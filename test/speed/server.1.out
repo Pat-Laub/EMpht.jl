@@ -1,0 +1,20 @@
+Fitting Exponential data using uniformization
+  1.219 s (13808272 allocations: 821.95 MiB)
+Fitting Exponential data using ODE
+  1.196 s (13219121 allocations: 585.78 MiB)
+Fitting binned Gamma distribution with CF1(100) using uniformization
+  3.709 s (744832 allocations: 8.02 GiB)
+Fitting binned Gamma distribution with CF1(20) using ODE
+  847.418 ms (901863 allocations: 1.13 GiB)
+Running ode_observations
+  30.043 μs (83 allocations: 34.25 KiB)
+Running ode_censored
+  28.544 μs (84 allocations: 34.41 KiB)
+Running c_integrand
+  58.117 μs (151 allocations: 62.08 KiB)
+Running d_integrand
+  57.033 μs (152 allocations: 62.23 KiB)
+Running e_step_observed_ode
+  124.322 ms (309618 allocations: 129.99 MiB)
+Running e_step_censored_ode
+  5.680 ms (14864 allocations: 5.65 MiB)
