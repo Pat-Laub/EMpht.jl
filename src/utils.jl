@@ -104,7 +104,7 @@ function save_progress(name::String, s::Sample, fit::PhaseType, start::DateTime)
     ll
 end
 
-function parse_settings(settings_filename::String)
+function parse_settings(settings_filename::String, verbose=false)
     # Check the file exists.
     if ~isfile(settings_filename)
         error("Settings file $settings_filename not found.")
@@ -116,7 +116,9 @@ function parse_settings(settings_filename::String)
     end
 
     # Read in the properties of this fit (e.g. number of phases, PH structure)
-    println("Reading settings from $settings_filename")
+    if verbose
+        println("Reading settings from $settings_filename")
+    end
     settings = JSON.parsefile(settings_filename, use_mmap=false)
 
     name = get(settings, "Name", basename(settings_filename)[1:end-5])

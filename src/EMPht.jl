@@ -141,7 +141,7 @@ end
 function empht(settings_filename::String; method=:unif, verbose=false)
     # Read in details for the fit from the settings file.
     s, p, ph_structure, name, continueFit, max_iter, timeout =
-        parse_settings(settings_filename)
+        parse_settings(settings_filename, verbose)
     empht(s, p=p, ph_structure=ph_structure, name=name, continueFit=continueFit,
             method=method, max_iter=max_iter, timeout=timeout, verbose=verbose)
 end
