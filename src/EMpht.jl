@@ -1,4 +1,4 @@
-module EMPht
+module EMpht
 
 using Dates
 using LinearAlgebra

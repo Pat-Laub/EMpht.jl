@@ -1,5 +1,5 @@
 using Distributions
-using EMPht
+using EMpht
 using LinearAlgebra: norm
 using Random
 using Test
@@ -10,7 +10,7 @@ trueRate = 10
 trueDist = Exponential(1/trueRate)
 
 Random.seed!(1)
-sObs = EMPht.Sample(obs=rand(trueDist, 1_000))
+sObs = EMpht.Sample(obs=rand(trueDist, 1_000))
 ph1unif = empht(sObs, p=1, method=:unif)
 ph1ode = empht(sObs, p=1, method=:ode)
 
@@ -29,7 +29,7 @@ int = [1.5 2.0; 2.0 2.5; 2.5 3.0; 3.0 3.5; 3.5 4.0; 4.0 4.5; 4.5 5.0; 5.0 5.5;
         5.5 6.0; 6.0 6.5; 6.5 7.0; 7.0 7.5]
 intweight = [4.0, 34.0, 107.0, 170.0, 202.0, 222.0, 140.0, 77.0, 24.0, 14.0,
         4.0, 2.0]
-sInt = EMPht.Sample(int=int, intweight=intweight)
+sInt = EMpht.Sample(int=int, intweight=intweight)
 
 phCF1 = empht(sInt, p=100, ph_structure="CanonicalForm1")
 fitPDFs = pdf.(phCF1, xGrid)
@@ -55,11 +55,11 @@ T = [-1.7486539983379394 1.7486539983379394 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0;
         0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.082614321671955 3.082614321671955;
         0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 -3.910958867504505]
 t=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.910958867504505]
-ph = EMPht.PhaseType(π, T, t)
+ph = EMpht.PhaseType(π, T, t)
 
 u = zeros(ph.p * ph.p)
 du = similar(u)
-EMPht.ode_observations!(du, u, ph, 10.0)
+EMpht.ode_observations!(du, u, ph, 10.0)
 
 duCorrect = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.60666e-10, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 3.8095e-9, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -72,7 +72,7 @@ duCorrect = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.60666e-10, 0.0, 0.0,
         1.093e-5]
 @test norm(du .- duCorrect, Inf) <= 1e-10
 
-EMPht.ode_censored!(du, u, ph, 10.0)
+EMpht.ode_censored!(du, u, ph, 10.0)
 
 duCorrect = [1.43358e-10, 1.43358e-10, 1.43358e-10, 1.43358e-10, 1.43358e-10,
         1.43358e-10, 1.43358e-10, 1.43358e-10, 1.43358e-10, 1.43358e-10,
@@ -114,7 +114,7 @@ cIntCorrect = [1.95424e-7, 1.37498e-7, 8.25671e-8, 3.9341e-8, 1.42689e-8,
         1.5326e-11, 0.000282308, 0.000198628, 0.000119276, 5.68317e-5,
         2.06127e-5, 5.24141e-6, 8.3338e-7, 8.4864e-8, 3.76306e-9, 1.63329e-11]
 
-@test norm(EMPht.c_integrand(5.0, ph, 10.0) .- cIntCorrect, Inf) <= 1e-8
+@test norm(EMpht.c_integrand(5.0, ph, 10.0) .- cIntCorrect, Inf) <= 1e-8
 
 dIntCorrect = [2.49838e-7, 1.38082e-7, 6.89019e-8, 2.75403e-8, 8.48015e-9,
         1.84014e-9, 2.4941e-10, 2.21039e-11, 8.4793e-13, 2.89092e-15,
@@ -136,12 +136,12 @@ dIntCorrect = [2.49838e-7, 1.38082e-7, 6.89019e-8, 2.75403e-8, 8.48015e-9,
         3.97845e-5, 1.22503e-5, 2.65825e-6, 3.60296e-7, 3.1931e-8, 1.22491e-9,
         4.1762e-12]
 
-@test norm(EMPht.d_integrand(5.0, ph, 10.0) .- dIntCorrect, Inf) <= 1e-8
+@test norm(EMpht.d_integrand(5.0, ph, 10.0) .- dIntCorrect, Inf) <= 1e-8
 
 
 p = ph.p; Bs = zeros(p); Zs = zeros(p); Ns = zeros(p, p+1)
 
-EMPht.e_step_observed_ode!(sObs, ph, Bs, Zs, Ns)
+EMpht.e_step_observed_ode!(sObs, ph, Bs, Zs, Ns)
 
 BsCorrect = [9.02369e-6, 9.24901e-5, 0.00041208, 0.00568032, 0.0558114,
         0.377397, 1.30242, 23.3691, 251.208, 723.681]
@@ -165,7 +165,7 @@ NsCorrect = [0.0 9.02399e-6 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0;
 
 p = ph.p; Bs = zeros(p); Zs = zeros(p); Ns = zeros(p, p+1)
 
-EMPht.e_step_censored_ode!(sInt, ph, Bs, Zs, Ns)
+EMpht.e_step_censored_ode!(sInt, ph, Bs, Zs, Ns)
 
 BsCorrect = [130.738, 174.776, 108.273, 188.54, 206.27, 126.544, 29.5952,
         26.7001, 8.34855, 0.214886]
