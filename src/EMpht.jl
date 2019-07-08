@@ -36,7 +36,8 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
     ll = 0
 
     numPlots = 0
-    for iter = 1:max_iter
+    iter = 1
+    while iter < max_iter
         ##  The expectation step!
         Bs = zeros(p); Zs = zeros(p); Ns = zeros(p, p+1)
 
@@ -105,6 +106,8 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
                     "Loglikelihood: ", round(Float64(ll), sigdigits=5))
             end
         end
+
+        iter += 1
     end
 
     fit
