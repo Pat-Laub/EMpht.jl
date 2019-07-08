@@ -39,7 +39,7 @@ end
 
 function e_step_observed_ode!(s::Sample, fit::PhaseType,
         Bs::AbstractArray{Float64}, Zs::AbstractArray{Float64},
-        Ns::AbstractArray{Float64})
+        Ns::AbstractArray{Float64}; truncate=false)
     # Setup initial conditions.
     p = fit.p
     u0 = zeros(p*p)
@@ -59,7 +59,7 @@ function e_step_observed_ode!(s::Sample, fit::PhaseType,
         u = sol(s.obs[k])
         C = reshape(u, p, p)
 
-        if minimum(C) < 0
+        if minimum(C) < 0 && !truncate
             (D,err) = hquadrature(x -> c_integrand(x, fit, s.obs[k]), 0,
             s.obs[k], rtol=1e-1, maxevals=500)
             C = reshape(D, p, p)
@@ -75,7 +75,7 @@ end
 
 function e_step_censored_ode!(s::Sample, fit::PhaseType,
         Bs::AbstractArray{Float64}, Zs::AbstractArray{Float64},
-        Ns::AbstractArray{Float64})
+        Ns::AbstractArray{Float64}; truncate=false)
     # Setup initial conditions.
     p = fit.p
     u0 = zeros(p*p)
@@ -96,7 +96,7 @@ function e_step_censored_ode!(s::Sample, fit::PhaseType,
         u = sol(s.cens[k])
         D = reshape(u, p, p)
 
-        if minimum(D) < 0
+        if minimum(D) < 0 && !truncate
             (D, err) = hquadrature(x -> d_integrand(x, fit, s.cens[k]), 0,
                 s.cens[k], rtol=1e-1, maxevals=500)
             D = reshape(D, p, p)
@@ -133,7 +133,8 @@ function e_step_censored_ode!(s::Sample, fit::PhaseType,
 
             u_left = sol(left)
             D_left = reshape(u_left, p, p)
-            if minimum(D_left) < 0 && iscoxian(fit)
+
+            if minimum(D_left) < 0 && !truncate
                 minD = minimum(D_left)
                 (D_left, err) = hquadrature(x -> d_integrand(x, fit, left), 0,
                     left, rtol=1e-1, maxevals=500)
@@ -152,16 +153,15 @@ function e_step_censored_ode!(s::Sample, fit::PhaseType,
 
         u_right = sol(right)
         D = reshape(u_right, p, p)
-        if minimum(D) < 0 && iscoxian(fit)
+
+        if minimum(D) < 0 && !truncate
             (D, err) = hquadrature(x -> d_integrand(x, fit, right), 0, right,
                 rtol=1e-1, maxevals=500)
             D = reshape(D, p, p)
         end
 
         T_legal = fit.T .> 0
-
         denom = fit.π' * (expTLeft - expTRight) * ones(fit.p)
-
         Bs[:] = Bs[:] + weight * (fit.π .* (h_left - h)) / denom
         Zs[:] = Zs[:] + weight * (g - g_left + diag(D_left) - diag(D)) / denom
         Ns[:,1:p] = Ns[:,1:p] + weight * T_legal .* (fit.T .* ((g - g_left) .+

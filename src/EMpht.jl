@@ -16,7 +16,7 @@ include("ode.jl")
 include("uniformization.jl")
 
 function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
-        verbose)
+        verbose, truncate)
     p = fit.p
 
     # Count the total of all weight.
@@ -44,7 +44,7 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
             if method == :unif
                 e_step_observed_uniform!(s, fit, Bs, Zs, Ns)
             elseif method == :ode
-                e_step_observed_ode!(s, fit, Bs, Zs, Ns)
+                e_step_observed_ode!(s, fit, Bs, Zs, Ns, truncate=truncate)
             else
                 error("Method should be :unif or :ode")
             end
@@ -54,7 +54,7 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
             if method == :unif
                 e_step_censored_uniform!(s, fit, Bs, Zs, Ns)
             elseif method == :ode
-                e_step_censored_ode!(s, fit, Bs, Zs, Ns)
+                e_step_censored_ode!(s, fit, Bs, Zs, Ns, truncate=truncate)
             else
                 error("Method should be :unif or :ode")
             end
@@ -111,7 +111,7 @@ function em_iterate(name, s, fit, ph_structure, method, max_iter, timeout,
 end
 
 function empht(s; p=1, ph_structure="Coxian", name="", continueFit=false,
-        method=:unif, max_iter=100, timeout=1, verbose=false)
+        method=:unif, max_iter=100, timeout=1, verbose=false, truncate=false)
 
     if verbose
         println("(p,ph_structure,name,method,continueFit,max_iter,timeout) = ",
@@ -135,7 +135,7 @@ function empht(s; p=1, ph_structure="Coxian", name="", continueFit=false,
         println("first pi is $(fit.π), first T is $(fit.T)\n")
     end
 
-    em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbose)
+    em_iterate(name, s, fit, ph_structure, method, max_iter, timeout, verbose, truncate)
 end
 
 function empht(settings_filename::String; method=:unif, verbose=false)
