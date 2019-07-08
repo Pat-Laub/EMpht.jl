@@ -60,9 +60,9 @@ function e_step_observed_ode!(s::Sample, fit::PhaseType,
         C = reshape(u, p, p)
 
         if minimum(C) < 0
-            (D,err) = hquadrature(x -> c_integrand(x, fit, s.obs[k]), 0,
+            (C,err) = hquadrature(x -> c_integrand(x, fit, s.obs[k]), 0,
             s.obs[k], rtol=1e-1, maxevals=500)
-            C = reshape(D, p, p)
+            C = reshape(C, p, p)
         end
 
         denom = fit.π' * b
