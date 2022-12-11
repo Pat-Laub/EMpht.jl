@@ -1,5 +1,6 @@
-using DelimitedFiles: readdlm, writedlm
+using CSV
 using JSON
+using Tables
 
 function loglikelihoodcensored(s::Sample, fit::PhaseType)
     ll = 0.0
@@ -31,7 +32,7 @@ function initial_phasetype(name::String, p::Int, ph_structure::String,
         if verbose
             println("Continuing fit in $phases_filename")
         end
-        phases = readdlm(phases_filename)
+        phases = CSV.read(phases_filename) |> Matrix
         π = phases[1:end, 1]
         T = phases[1:end, 2:end]
         if length(π) != p || size(T) != (p, p)
@@ -98,7 +99,7 @@ function save_progress(name::String, s::Sample, fit::PhaseType, start::DateTime)
             write(f, "$ll $(round(mins; digits=4))\n")
         end
 
-        writedlm(string(name, "_fit.csv"), [fit.π fit.T])
+        CSV.write(string(name, "_fit.csv"), [fit.π fit.T] |> Tables.table)
     end
 
     ll
